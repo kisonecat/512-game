@@ -111,17 +111,16 @@ merge_and_move:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; add a random block at a blank space on the board
 add_if_any_empty:	
-	mov bx, board		; bx points to the start of the board
-
-	mov di, 0
+	mov di, 0		; for di = 0 ... 15
 check_spot:
-	mov al, [bx+di]	
+	mov al, [board+di]	; check if board[di] == 0
 	cmp al, 0
-	jz add_random_block
+	jz add_random_block	; if there is an empty spot somewhere, add a random block
 	
-	inc di	
-	cmp di, 16
+	inc di			; end of for loop
+	cmp di, 16		
 	jnz check_spot
+	
 	ret
 
 add_random_block:
@@ -243,7 +242,7 @@ draw_col:
 	jnz draw_col		; continue unless cx == 0
 	
 	dec dx			; dx := dx - 1
-	jnz draw_row		; continu unless dx == 0
+	jnz draw_row		; continue unless dx == 0
 	
 	;; clear keyboard buffer directly
 	push ds			; save segment pointers
@@ -336,9 +335,11 @@ drawbox:
 	pop dx
 	pop cx
 	ret
-	
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; thanks to Oscar Toledo G. for this!
 %ifdef comfile
 %else
         times 510-($-$$) db 0x4f
-        db 0x55,0xaa            ; Make it a bootable sector
+        db 0x55,0xaa            ; Make it a bootable sector!
 %endif
