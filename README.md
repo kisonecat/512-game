@@ -1,4 +1,4 @@
-# The 512 game -- just like 2048, but its fits in a boot sector.
+# The 512 game -- just like 2048, but it fits in a boot sector.
 
 ![Screenshot of the game in action](screenshot.png?raw=true "A screenshot of the game in action")
 
