@@ -26,14 +26,17 @@
 base:	equ 0xfc80      ; Base of memory (in video!)
 board:	equ base	; 4x4 array for the current board
 seed:	equ base+16	; random seed
-changed:	equ base+18	; random seed	
+changed:	equ base+18	; mark if anything changed
+px:	equ base+20
+py:	equ base+22
 	
 graphics_mode:	
         mov ax,0xa000   ; Set DS = 0xA000, video memory
         mov ds,ax
         mov ax,0x0013   ; BIOS set VGA mode 13h
         int 0x10
-
+        cld		; FIXME: is this needed?
+	
 	mov word [seed], 17 	; initialize random seed
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -227,26 +230,26 @@ _draw:
 	call add_if_any_empty	; if there's a blank space somewhere, add a new "2" tile
 nothing_changed:
 	
-	mov dx,4		; for dx = 4 ... 0, the row
+	mov dh,4		; for dh = 4 ... 0, the row
 draw_row:
-	mov cx,4		; for cx = 4 ... 0, the column
+	mov dl,4		; for dl = 4 ... 0, the column
 draw_col:
-	mov di, dx		; di := 4*dx + cx
-	shl di, 2
-	add di, cx
-	mov al, byte [board+di-1-4] ; al := board[4*(dx-1) + (cx-1)]
+	mov bx, dx		; bx := 4*dh + dl
+	shl bh, 2
+	add bh, dl
+	shr bx, 8
 	
-	call drawbox		; draw the tile with value al at (cx,dx)
+	mov al, byte [bx+board-1-4] ; al := board[4*(dx-1) + (cx-1)]
+	
+	call drawbox		; draw the tile with value al at 
 
-	dec cx			; cx := cx - 1
-	jnz draw_col		; continue unless cx == 0
+	dec dl			; dl := dl - 1
+	jnz draw_col		; continue unless dl == 0
 	
-	dec dx			; dx := dx - 1
-	jnz draw_row		; continue unless dx == 0
+	dec dh			; dh := dh - 1
+	jnz draw_row		; continue unless dh == 0
 	
 	;; clear keyboard buffer directly
-	push ds			; save segment pointers
-	push es
 	mov ax,0x40		; es := 0x0040
 	mov es,ax
 	mov ds,ax		; ds := 0x0040
@@ -254,90 +257,96 @@ draw_col:
 	mov si,0x1c
 	movsw			; set 0x40:0x1c = 0x40:0x1a
 
-	pop es			; restore segment pointers
-	pop ds
+        mov ax,0xa000		; restore segment pointers
+        mov ds,ax	
 	
 	hlt			; end of _draw
 	jmp _update	
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; draw rectangle in color al at (cx,dx)
-drawrect:
-WIDTH:	equ 48
-HEIGHT:	equ 48
-	
-	mov ah,0x0c 		; prepare bios call to set pixel
-
-	mov bx,WIDTH		; loop on bx
-	add dx,HEIGHT
-rect_col:
-	push bx
-	
-	mov bx,HEIGHT		; inner loop on bx
-	sub dx,HEIGHT
-rect_row:
-	int 0x10		; bios call to set pixel
-	
-	inc dx			; move down a row
-	dec bx			; countdown until finished with row
-	jnz rect_row
-	
-	pop bx
-	inc cx			; move onto next row
-	dec bx			; countdown until finished with col
-	jnz rect_col
-
-	ret
-	
 ;;; draw value al at (cx,dx)
 ;;; preserves cx, dx
 drawbox:
-	push cx
-	dec cx
 	push dx
-	dec dx
-	
 	push ax
-	
-	mov ax, 50
-	mul cl
-	mov cx, ax
 
-	mov ax, 50
-	mul dl
-	mov dx, ax	
+	dec dl			; dl and dh are between 0 and 3
+	dec dh
+
+	mov al, dl		; ax = dl * 40
+	mov bl, 40
+	mul bl
+	add ax, 80
+	push ax			
+	
+	mov al, dh		; ax = dh * 40
+	mov bl, 40
+	mul bl
+	add ax, 8*2
+	pop bx			; bx = dl*40, ax = dh*40
+
+	mov cx, 320		; ax = (dh * 40) * 320
+	mul cx
+	add bx, ax		; bx = (dl*40)*320 + (dh*40)
 
 	pop ax
-	inc cx
-	inc dx
-	add cx, 60
-	call drawrect		
+
+	mov di, bx
+	
+	mov cx,ds		; es := cx
+	mov es,cx	
+
+	mov bx, 40
+	
+next_line:	
+	mov cx, 40
+	rep stosb
+	add di, 320-40
+	dec bx
+	jnz next_line
 
 	pop dx
-	pop cx
-
-	push cx
 	push dx
+	
+	dec dl
+	dec dh
 
-	mov ah, 0x02
-	mov bh, 0
-	mov dh, cl
-	xchg dh, dl
-	int 0x10
+	mov bx, dx
 	
-	mov bh, 0 		; write character
-	mov ah, 0x09
-	mov bl, 15
-	mov cx, 1
-	or al, 48
-	int 0x10
+	shl dl, 2
+	add dl, bl
+
+	shl dh, 2
+	add dh, bh
+
+	add dl, 11
+	add dh, 2+2
 	
-	pop dx
-	pop cx
+	mov ah, 0
+	mov bp, numbers
+	mov bl, 3
+	mul bl
+	add bp, ax
+
+	mov ax,cs		; es := cx
+	mov es,ax	
+
+	mov ah, 0x13
+	mov al, 0
+	mov bx, 15
+	mov cx, 3
+	int 0x10
+
+	pop dx			; dh,dl = the position
+	
 	ret
+	
 
+numbers: db '    2  4  8  16 32 64128256512'
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; thanks to Oscar Toledo G. for this!
+;;;
+;;; "The last two bytes must be 0x55, 0xAA to be recognized as a boot sector."
 %ifdef comfile
 %else
         times 510-($-$$) db 0x4f
