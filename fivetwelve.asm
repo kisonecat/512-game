@@ -23,12 +23,10 @@
         org 0x7c00      ; Boot sector is loaded at 7C00h
 %endif
 
-base:	equ 0xfc80      ; Base of memory (in video!)
-board:	equ base	; 4x4 array for the current board
-seed:	equ base+16	; random seed
+base:	equ 0xfc80      	; Base of memory (thanks to Oscar!)
+board:	equ base		; 4x4 array for the current board
+seed:	equ base+16		; random seed
 changed:	equ base+18	; mark if anything changed
-px:	equ base+20
-py:	equ base+22
 	
 graphics_mode:
 	push 0xA000		; ds = 0xA000
