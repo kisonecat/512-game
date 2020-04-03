@@ -30,27 +30,31 @@ changed:	equ base+18	; mark if anything changed
 px:	equ base+20
 py:	equ base+22
 	
-graphics_mode:	
-        mov ax,0xa000   ; Set DS = 0xA000, video memory
-        mov ds,ax
+graphics_mode:
+	push 0xA000		; ds = 0xA000
+	pop ds
+
         mov ax,0x0013   ; BIOS set VGA mode 13h
         int 0x10
         cld		; FIXME: is this needed?
 	
-	mov word [seed], 17 	; initialize random seed
+	inc word [seed]		; initialize random seed
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 _init:
-	mov di, 0
-clear_spot:
-	mov byte [board+di], 0
-	inc di
-	cmp di, 16
-	jnz clear_spot
+	push ds
+	pop es
+
+	mov di, board
+	mov cx, 16
+	mov al, 0
+	rep stosb
 
 	call add_if_any_empty
 	call add_if_any_empty	
 	jmp _draw
+
+	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; merge block at bx and bx+di
@@ -113,19 +117,18 @@ merge_and_move:
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; add a random block at a blank space on the board
-add_if_any_empty:	
-	mov di, 0		; for di = 0 ... 15
-check_spot:
-	mov al, [board+di]	; check if board[di] == 0
-	cmp al, 0
-	jz add_random_block	; if there is an empty spot somewhere, add a random block
+add_if_any_empty:
+	mov cx,ds		; es := ds
+	mov es,cx	
 	
-	inc di			; end of for loop
-	cmp di, 16		
-	jnz check_spot
+	mov cx, 16
+	mov di, board
+	mov al, 0
+	repne scasb
+	jz add_random_block
 	
 	ret
-
+	
 add_random_block:
 try_again:
 	;;; get random number between 0 and 16
@@ -157,37 +160,48 @@ try_again:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; transform the state of the game based on player input
 _update:
-	mov ah, 0		; read a key (blocking) from bios
-	int 0x16		; the scan code is in ah
+	hlt			; wait for something to happen
+
+	;; wait for key press ("make")
+	in al,60h
+	test al,0x80
+	jz _update
 	
-	cmp ah, 0x01		; escape key resets game
+keypress:
+	;; wait for key release ("break")
+	in al,60h
+	test al,0x80
+	jnz keypress
+	
+	and al,0x7F		; get the scan code from the "break" code
+	
+	cmp al, 0x01		; escape key resets game
 	je _init
 
 	mov byte [changed], 0	; changed = 0, to record if anything changes
 	
-	cmp ah, 0x48		; jump to handlers for arrow keys
+	push _draw
+	cmp al, 0x48		; jump to handlers for arrow keys
 	je keyup
-	cmp ah, 0x4b
+	cmp al, 0x4b
 	je keyleft
-	cmp ah, 0x4d
+	cmp al, 0x4d
 	je keyright
-	cmp ah, 0x50
+	cmp al, 0x50
 	je keydown
 
+	ret
 	;; if we are here, we typed a key we ignore
-	hlt			; wait for something to happen
-	jmp _update		; continue the game loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 keydown:
 	mov di, 4
-%assign i 0
+	mov bx, board
 %rep 4	
-	mov bx, board+i
 	call merge_and_move
-%assign i i+1
+	inc bx	
 %endrep	
-	jmp _draw
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;		
 keyleft:
@@ -199,7 +213,7 @@ keyleft:
 	call merge_and_move
 %assign i i+4
 %endrep		
-	jmp _draw
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;		
 keyright:
@@ -210,18 +224,17 @@ keyright:
 	call merge_and_move
 %assign i i+4
 %endrep
-	jmp _draw
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;		
 keyup:
 	mov di, -4
-%assign i 12
+	mov bx, board+12
 %rep 4	
-	mov bx, board+i
 	call merge_and_move
-%assign i i+1
+	inc bx
 %endrep	
-	jmp _draw		
+	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 _draw:
@@ -240,32 +253,8 @@ draw_col:
 	shr bx, 8
 	
 	mov al, byte [bx+board-1-4] ; al := board[4*(dx-1) + (cx-1)]
-	
-	call drawbox		; draw the tile with value al at 
 
-	dec dl			; dl := dl - 1
-	jnz draw_col		; continue unless dl == 0
-	
-	dec dh			; dh := dh - 1
-	jnz draw_row		; continue unless dh == 0
-	
-	;; clear keyboard buffer directly
-	mov ax,0x40		; es := 0x0040
-	mov es,ax
-	mov ds,ax		; ds := 0x0040
-	mov di,0x1a
-	mov si,0x1c
-	movsw			; set 0x40:0x1c = 0x40:0x1a
-
-        mov ax,0xa000		; restore segment pointers
-        mov ds,ax	
-	
-	hlt			; end of _draw
-	jmp _update	
-
-;;; draw value al at (cx,dx)
-;;; preserves cx, dx
-drawbox:
+	;; draw the tile with value al at 
 	push dx
 	push ax
 
@@ -291,9 +280,9 @@ drawbox:
 	pop ax
 
 	mov di, bx
-	
-	mov cx,ds		; es := cx
-	mov es,cx	
+
+	push ds			; es := ds
+	pop es
 
 	mov bx, 40
 	
@@ -327,19 +316,25 @@ next_line:
 	mul bl
 	add bp, ax
 
-	mov ax,cs		; es := cx
-	mov es,ax	
+	push cs 		; es := cs
+	pop es
 
-	mov ah, 0x13
-	mov al, 0
+	mov ax, 0x1300
 	mov bx, 15
 	mov cx, 3
 	int 0x10
 
 	pop dx			; dh,dl = the position
+
+	dec dl			; dl := dl - 1
+	jnz draw_col		; continue unless dl == 0
 	
-	ret
+	dec dh			; dh := dh - 1
+	jnz draw_row		; continue unless dh == 0
 	
+	jmp _update		; end of _draw
+
+
 
 numbers: db '    2  4  8  16 32 64128256512'
 	
