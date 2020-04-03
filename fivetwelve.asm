@@ -118,8 +118,8 @@ merge_and_move:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; add a random block at a blank space on the board
 add_if_any_empty:
-	mov cx,ds		; es := ds
-	mov es,cx	
+	push ds		; es := ds
+	pop es
 	
 	mov cx, 16
 	mov di, board
