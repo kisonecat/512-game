@@ -22,36 +22,36 @@
 %else
         org 0x7c00      ; Boot sector is loaded at 7C00h
 %endif
-
+	
 base:	equ 0xfc80      	; Base of memory (thanks to Oscar!)
 board:	equ base		; 4x4 array for the current board
 seed:	equ base+16		; random seed
 changed:	equ base+18	; mark if anything changed
 	
 graphics_mode:
-	push 0xA000		; ds = 0xA000
+	push 0xA000		; ds = 0xA000 -- same as video ram
 	pop ds
 
         mov ax,0x0013   ; BIOS set VGA mode 13h
         int 0x10
-        cld		; FIXME: is this needed?
+        cld		; make sure our reps move in the right direction
 	
-	inc word [seed]		; initialize random seed
+	inc word [seed]		; initialize random seed to something nonzero
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; "init" is called to start the game, e.g., when escape is pressed
 _init:
-	push ds
-	pop es
+	push ds			; set es = ds
+	pop es			; push/pop is shorter than movs
 
-	mov di, board
+	mov di, board		; clear the 16 bytes stored at board
 	mov cx, 16
 	mov al, 0
 	rep stosb
 
-	call add_if_any_empty
+	call add_if_any_empty	; add a couple "2" tiles to the board
 	call add_if_any_empty	
-	jmp _draw
-
+	jmp _draw		; after we init, we draw the empty screen
 	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -70,12 +70,12 @@ different_blocks:		; else nothing to do
 	ret
 
 merge_all_blocks:
-	push bx
-%rep 3
-	call merge_blocks
-	add bx, di
+	push bx			; preserve bx
+%rep 3				; for each of the three neighboring pairs of blocks...
+	call merge_blocks	; merge them 
+	add bx, di		; move to the next block
 %endrep
-	pop bx
+	pop bx			; bx points to the board, and we will call this again, so restore bx
 	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -117,30 +117,30 @@ merge_and_move:
 ;;; add a random block at a blank space on the board
 add_if_any_empty:
 	push ds		; es := ds
-	pop es
+	pop es		; again, push/pop is shorter than mov's
 	
-	mov cx, 16
-	mov di, board
-	mov al, 0
+	mov cx, 16		; jump to "add_random_block" if ANY
+	mov di, board		; of the 16 bytes stored at board
+	mov al, 0		; are nonzero
 	repne scasb
 	jz add_random_block
 	
-	ret
+	ret			; if we are here, the board is full, so just return
 	
 add_random_block:
 try_again:
 	;;; get random number between 0 and 16
 	mov bx, [seed]		; load seed into bx
 	
-	mov ax, bx		; seed = seed xor (seed << 7)
+	mov ax, bx		; seed := seed xor (seed << 7)
 	shl ax, 7
 	xor bx, ax
 
-	mov ax, bx		; seed = seed xor (seed << 9)
+	mov ax, bx		; seed := seed xor (seed << 9)
 	shr ax, 9
 	xor bx, ax
 
-	mov ax, bx		; seed = seed xor (seed << 8)
+	mov ax, bx		; seed := seed xor (seed << 8)
 	shl ax, 8
 	xor bx, ax
 
@@ -177,8 +177,9 @@ keypress:
 	je _init
 
 	mov byte [changed], 0	; changed = 0, to record if anything changes
+
+	push _draw		; we will "ret" to _draw saving a few bytes
 	
-	push _draw
 	cmp al, 0x48		; jump to handlers for arrow keys
 	je keyup
 	cmp al, 0x4b
@@ -188,8 +189,9 @@ keypress:
 	cmp al, 0x50
 	je keydown
 
-	ret
 	;; if we are here, we typed a key we ignore
+	;; so we "ret" which jumps us back to the _draw address we pushed
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 keydown:
@@ -197,14 +199,13 @@ keydown:
 	mov bx, board
 %rep 4	
 	call merge_and_move
-	inc bx	
+	inc bx
 %endrep	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;		
 keyleft:
 	mov di, -1
-
 %assign i 3
 %rep 4	
 	mov bx, board+i
@@ -331,7 +332,6 @@ next_line:
 	jnz draw_row		; continue unless dh == 0
 	
 	jmp _update		; end of _draw
-
 
 
 numbers: db '    2  4  8  16 32 64128256512'
